@@ -1,21 +1,21 @@
 # Automated Lead Enrichment
 
-MVP workflow untuk **inbound lead enrichment & onboarding otomatis**. Menggabungkan **n8n** untuk automasi alur kerja dengan **Laravel + Filament** untuk manajemen leads.
+**MVP workflow for automated inbound lead enrichment and onboarding.** Combines **n8n** for workflow automation with **Laravel + Filament** for lead management.
 
 ---
 
-## 📋 Ringkasan
+## 📋 Summary
 
-| Komponen | Teknologi |
+| Component | Technology |
 |----------|-----------|
-| **Alur Kerja** | n8n — webhook intake, enrichment, routing |
-| **Backend API** | Laravel 11 — REST API untuk CRUD leads |
-| **Admin Panel** | Filament 3 — panel manajemen leads |
-| **Database** | SQLite (default), bisa diganti MySQL/PostgreSQL |
+| **Workflow Engine** | n8n — webhook intake, enrichment, routing |
+| **Backend API** | Laravel 11 — REST API for lead CRUD |
+| **Admin Panel** | Filament 3 — lead management panel |
+| **Database** | SQLite (default), switchable to MySQL/PostgreSQL |
 
 ---
 
-## 🏗️ Arsitektur
+## 🏗️ Architecture
 
 ```text
 [Inbound Lead] → n8n Webhook
@@ -43,19 +43,19 @@ MVP workflow untuk **inbound lead enrichment & onboarding otomatis**. Menggabung
 ```text
 Missing required fields  → 400 Bad Request
 Laravel API down         → internal alert → 502 Bad Gateway
-Enrichment failed        → lead tetap dibuat dengan data partial
+Enrichment failed        → lead is still created with partial data
 ```
 
 ---
 
-## 🚀 Setup Lokal
+## 🚀 Local Setup
 
 ### Prerequisites
 
 - PHP 8.2+
 - Composer 2.x
-- Node.js 18+ (opsional, untuk Filament asset)
-- n8n (self-hosted atau cloud)
+- Node.js 18+ (optional, for Filament assets)
+- n8n (self-hosted or cloud)
 
 ### 1. Clone & Install Laravel
 
@@ -69,14 +69,14 @@ php artisan key:generate
 
 ### 2. Database
 
-Default pakai SQLite:
+Default SQLite:
 
 ```bash
 touch database/database.sqlite
 php artisan migrate
 ```
 
-Ganti ke MySQL/PostgreSQL dengan edit `.env`:
+Switch to MySQL/PostgreSQL by editing `.env`:
 
 ```env
 DB_CONNECTION=mysql
@@ -91,10 +91,10 @@ DB_PASSWORD=
 
 ```bash
 php artisan make:filament-user
-# Isi: name, email, password
+# Fill in: name, email, password
 ```
 
-### 4. Jalankan Dev Server
+### 4. Run Dev Server
 
 ```bash
 php artisan serve
@@ -105,11 +105,11 @@ php artisan serve
 
 ### 5. Setup n8n Workflow
 
-1. Buka n8n → **Import from File**
-2. Pilih `n8n/lead-enrichment-workflow.json`
-3. Update credential:
+1. Open n8n → **Import from File**
+2. Select `n8n/lead-enrichment-workflow.json`
+3. Update credentials:
    - **HTTP Request** node → URL: `http://your-server:8000/api/leads`
-   - **Header** → `Authorization: Bearer YOUR_API_TOKEN` (atau token tersendiri)
+   - **Header** → `Authorization: Bearer YOUR_API_TOKEN` (or a custom token)
 4. **Activate** workflow
 
 ---
@@ -125,7 +125,7 @@ php artisan serve
 | `PUT/PATCH` | `/api/leads/{id}` | Update lead | No* |
 | `DELETE` | `/api/leads/{id}` | Delete lead | No* |
 
-*\*Untuk production, tambahkan middleware auth (Sanctum token atau API key).*
+*\*For production, add auth middleware (Sanctum token or API key).*
 
 ### Example: POST /api/leads
 
@@ -170,7 +170,7 @@ File: `n8n/lead-enrichment-workflow.json`
 
 ```text
 1. Webhook Lead Intake       — POST /webhook/lead-enrich
-2. Validate Required Fields  — IF node: name + email wajib
+2. Validate Required Fields  — IF node: name + email required
 3. Normalize Lead            — Code node: format data
 4. Mock Company Enrichment   — Code node: generate mock enrichment data
                               (company_size, industry, linkedin_url)
@@ -185,7 +185,7 @@ File: `n8n/lead-enrichment-workflow.json`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LARAVEL_API_URL` | `http://localhost:8000/api/leads` | Laravel API endpoint |
-| `AUTOMATION_TOKEN` | `demo-secret-token` | Token untuk auth antar service |
+| `AUTOMATION_TOKEN` | `demo-secret-token` | Token for inter-service auth |
 
 ---
 
@@ -209,7 +209,7 @@ curl http://localhost:8000/api/leads
 ### Test n8n → Laravel flow
 
 ```bash
-# Ganti dengan URL n8n Anda
+# Replace with your n8n URL
 curl -X POST https://your-n8n.com/webhook/lead-enrich \
   -H "Content-Type: application/json" \
   -d '{
@@ -220,21 +220,27 @@ curl -X POST https://your-n8n.com/webhook/lead-enrich \
   }'
 ```
 
----
+### Run PHPUnit Tests
 
-## 🧠 Pemanfaatan AI
-
-Proyek ini dikembangkan dengan bantuan **Hermes Agent** (Nous Research):
-
-- **Perencanaan workflow** — AI menyusun alur n8n berdasarkan brief lead enrichment
-- **Generasi kode** — Controller, model, migration, dan Filament resource di-generate oleh AI
-- **Payload examples** — Contoh request/response disusun AI
-- **Dokumentasi** — README ini ditulis dengan bantuan AI
-- **Debugging** — AI membantu diagnose error dan optimasi struktur
+```bash
+php artisan test
+```
 
 ---
 
-## 📁 Struktur Folder
+## 🧠 AI Utilization
+
+This project was developed with the assistance of **Hermes Agent** (Nous Research):
+
+- **Workflow planning** — AI structured the n8n flow based on the lead enrichment brief
+- **Code generation** — Controller, model, migration, and Filament resource were generated by AI
+- **Payload examples** — Example request/response payloads composed by AI
+- **Documentation** — This README was written with AI assistance
+- **Debugging** — AI helped diagnose errors and optimize structure
+
+---
+
+## 📁 Folder Structure
 
 ```text
 AutomatedLeadEnrichment/
@@ -271,7 +277,7 @@ composer install --optimize-autoloader --no-dev
 
 # 2. Environment
 cp .env.example .env
-# Edit .env: APP_URL, DB, dll
+# Edit .env: APP_URL, DB credentials, etc.
 php artisan key:generate
 
 # 3. Migrate & optimize
@@ -281,11 +287,11 @@ php artisan route:cache
 php artisan view:cache
 
 # 4. Serve via nginx
-# Point root ke project/public/
+# Point root to project/public/
 # PHP-FPM + nginx reverse proxy
 ```
 
-### Nginx Config (Opsional)
+### Nginx Config (Optional)
 
 ```nginx
 server {
@@ -307,20 +313,20 @@ server {
 
 ---
 
-## 📝 Asumsi & Catatan
+## 📝 Assumptions & Notes
 
-1. **Enrichment data bersifat mock** untuk MVP. Di production, ganti Mock Enrichment node dengan API sungguhan (Apollo, Clearbit, People Data Labs, atau approved LinkedIn data provider).
-2. **Welcome email & sales notification** menggunakan node email n8n. Di production, integrasikan dengan SendGrid / Mailgun / SMTP.
-3. **Autentikasi API endpoint** sengaja dibuka untuk MVP. Di production, aktifkan middleware Sanctum atau n8n automation token.
-4. **SQLite** dipilih untuk kemudahan setup. Untuk skala besar, gunakan MySQL/PostgreSQL.
-5. **Filament admin panel** bisa di-customize lebih lanjut: tambah widget dashboard, export CSV, dll.
+1. **Enrichment data is mocked** for MVP. In production, replace the Mock Enrichment node with a real API (Apollo, Clearbit, People Data Labs, or an approved LinkedIn data provider).
+2. **Welcome email & sales notification** use n8n email nodes. In production, integrate with SendGrid / Mailgun / SMTP.
+3. **API endpoint auth** is intentionally open for MVP. For production, enable Sanctum middleware or n8n automation token.
+4. **SQLite** is chosen for easy setup. For production scale, use MySQL/PostgreSQL.
+5. **Filament admin panel** can be further customized: add dashboard widgets, CSV export, etc.
 
 ---
 
 ## 📄 License
 
-MIT — Gratis untuk personal & commercial use.
+MIT — Free for personal & commercial use.
 
 ---
 
-*Dibuat oleh [indraseptianto](https://github.com/indraseptianto) — Automation & AI Solutions*
+*Built by [indraseptianto](https://github.com/indraseptianto) — Automation & AI Solutions*
