@@ -1,0 +1,546 @@
+{
+  "name": "Lead Gen Automation - AI Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-gen-automation",
+        "options": {
+          "responseMode": "responseNode"
+        },
+        "responseMode": "responseNode"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "webhook-lead-gen",
+      "name": "Webhook Lead Intake",
+      "webhookId": "lead-gen-automation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "auth-check",
+              "leftValue": "={{ $json.headers[\"x-api-key\"] }}",
+              "rightValue": "={{ $env.AUTOMATION_TOKEN }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        224,
+        0
+      ],
+      "id": "auth-check-node",
+      "name": "Authorize Request"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"Unauthorized\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        448,
+        240
+      ],
+      "id": "resp-unauth",
+      "name": "Respond Unauthorized"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize incoming lead payload\nconst item = $input.first().json;\nconst body = item.body || item;\n\n// Map aliases\nconst lead = {\n  name: body.name || body.fullName || body.full_name || '',\n  email: body.email || '',\n  phone: body.phone || body.phoneNumber || body.mobile || '',\n  company: body.company || body.business || body.company_name || '',\n  website: body.website || body.url || '',\n  source: body.source || 'webhook',\n  message: body.message || body.notes || body.description || '',\n  industry: body.industry || '',\n  location: body.location || body.city || body.country || '',\n};\n\n// Validation\nconst errors = [];\nif (!lead.name) errors.push('name is required');\nif (!lead.email && !lead.phone) errors.push('email or phone is required');\n\n// Assign score points\nlet score = 0;\nif (lead.name) score += 10;\nif (lead.email) score += 15;\nif (lead.phone) score += 10;\nif (lead.company) score += 15;\nif (lead.website) score += 10;\nif (lead.message) score += 5;\n\nlead.initial_score = score;\nlead.errors = errors;\nlead.valid = errors.length === 0;\nlead.received_at = new Date().toISOString();\n\nreturn [{ json: lead }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "normalize-lead",
+      "name": "Normalize & Validate"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "=true",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        0
+      ],
+      "id": "validation-check",
+      "name": "Validation Passed?"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"Validation failed\", \"missing_fields\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        896,
+        240
+      ],
+      "id": "resp-invalid",
+      "name": "Respond Invalid"
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_maps"
+            },
+            {
+              "name": "q",
+              "value": "={{ $json.company ? $json.company + ' ' + $json.location : $json.name }}"
+            },
+            {
+              "name": "type",
+              "value": "search"
+            },
+            {
+              "name": "num",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        0
+      ],
+      "id": "serpapi-enrich",
+      "name": "SerpAPI Company Enrichment"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process SerpAPI enrichment results\nconst item = $input.first().json;\n\nconst result = {\n  ...item,\n  enrichment: {\n    enriched_at: new Date().toISOString(),\n    source: 'SerpAPI Google Maps',\n  }\n};\n\n// Check if SerpAPI returned results\nconst results = item.local_results || [];\nif (results.length > 0) {\n  const first = results[0];\n  result.enrichment.company_name = first.title || item.company;\n  result.enrichment.address = first.address || '';\n  result.enrichment.phone = first.phone || item.phone;\n  result.enrichment.website = first.website || item.website;\n  result.enrichment.rating = first.rating || 0;\n  result.enrichment.reviews = first.reviews || 0;\n  result.enrichment.type = first.type || '';\n  result.enrichment.status = 'enriched';\n\n  // Boost score if we found data\n  if (first.website) result.initial_score += 10;\n  if (first.phone) result.initial_score += 5;\n  if (first.rating && first.rating > 4) result.initial_score += 10;\n} else {\n  result.enrichment.status = 'not_found';\n  result.enrichment.note = 'No Google Maps listing found for this company';\n}\n\nresult.final_score = Math.min(result.initial_score, 100);\n\n// Lead score classification\nif (result.final_score >= 70) result.lead_quality = 'hot';\nelse if (result.final_score >= 40) result.lead_quality = 'warm';\nelse result.lead_quality = 'cold';\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "process-enrich",
+      "name": "Process Enrichment"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.LARAVEL_API_URL || 'http://localhost:8000/api/leads' }}",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.enrichment.phone || $json.phone }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.enrichment.company_name || $json.company }}"
+            },
+            {
+              "name": "website",
+              "value": "={{ $json.enrichment.website || $json.website }}"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.source }}"
+            },
+            {
+              "name": "industry",
+              "value": "={{ $json.industry || $json.enrichment.type }}"
+            },
+            {
+              "name": "location",
+              "value": "={{ $json.enrichment.address || $json.location }}"
+            },
+            {
+              "name": "notes",
+              "value": "={{ '[Automated Lead Gen] Score: ' + $json.final_score + '/100 - Quality: ' + $json.lead_quality + ' | Message: ' + ($json.message || 'No message') }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.lead_quality === 'hot' ? 'new' : 'new' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "laravel-store",
+      "name": "POST Lead to Laravel API"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "laravel-status",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "=true",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1568,
+        0
+      ],
+      "id": "laravel-check",
+      "name": "Laravel API Success?"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"Failed to store lead in database\", \"status\": $json.statusCode || \"unknown\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1792,
+        240
+      ],
+      "id": "resp-laravel-fail",
+      "name": "Respond Storage Failed"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "quality-check",
+              "leftValue": "={{ $json.lead_quality }}",
+              "rightValue": "=hot",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        0
+      ],
+      "id": "quality-check",
+      "name": "Hot Lead? (Score >= 70)"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.EMAIL_FROM || 'noreply@leadgen.local' }}",
+        "toEmail": "={{ $env.SALES_EMAIL || 'sales@company.com' }}",
+        "subject": "=🔥 HOT LEAD: {{ $json.name }} from {{ $json.enrichment.company_name || $json.company }}",
+        "text": "={{ 'New hot lead received!\\n\\nName: ' + $json.name + '\\nEmail: ' + $json.email + '\\nPhone: ' + ($json.enrichment.phone || $json.phone) + '\\nCompany: ' + ($json.enrichment.company_name || $json.company) + '\\nWebsite: ' + ($json.enrichment.website || $json.website) + '\\nScore: ' + $json.final_score + '/100\\nQuality: ' + $json.lead_quality + '\\nSource: ' + $json.source + '\\n\\nView in dashboard: ' + ($env.DASHBOARD_URL || 'http://localhost:8000/admin') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        -120
+      ],
+      "id": "notif-hot",
+      "name": "Notify Sales - Hot Lead"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.EMAIL_FROM || 'noreply@leadgen.local' }}",
+        "toEmail": "={{ $env.SALES_EMAIL || 'sales@company.com' }}",
+        "subject": "=📋 New Lead: {{ $json.name }} ({{ $json.lead_quality }})",
+        "text": "={{ 'New lead received.\\n\\nName: ' + $json.name + '\\nEmail: ' + $json.email + '\\nPhone: ' + ($json.enrichment.phone || $json.phone) + '\\nCompany: ' + ($json.enrichment.company_name || $json.company) + '\\nScore: ' + $json.final_score + '/100\\nQuality: ' + $json.lead_quality + '\\nSource: ' + $json.source + '\\n\\nView in dashboard: ' + ($env.DASHBOARD_URL || 'http://localhost:8000/admin') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        120
+      ],
+      "id": "notif-warm",
+      "name": "Notify Sales - Standard Lead"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"ok\": true,\n  \"message\": \"Lead processed successfully\",\n  \"lead_id\": $('POST Lead to Laravel API').item.json.lead?.id || null,\n  \"final_score\": $json.final_score,\n  \"lead_quality\": $json.lead_quality,\n  \"enriched\": $json.enrichment.status === 'enriched',\n  \"company_name\": $json.enrichment.company_name || null\n} }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2240,
+        0
+      ],
+      "id": "resp-success",
+      "name": "Respond Success"
+    }
+  ],
+  "connections": {
+    "Webhook Lead Intake": {
+      "main": [
+        [
+          {
+            "node": "Authorize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorize Request": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Validate": {
+      "main": [
+        [
+          {
+            "node": "Validation Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation Passed?": {
+      "main": [
+        [
+          {
+            "node": "SerpAPI Company Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI Company Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Process Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Enrichment": {
+      "main": [
+        [
+          {
+            "node": "POST Lead to Laravel API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Lead to Laravel API": {
+      "main": [
+        [
+          {
+            "node": "Laravel API Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Laravel API Success?": {
+      "main": [
+        [
+          {
+            "node": "Hot Lead? (Score >= 70)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Storage Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot Lead? (Score >= 70)": {
+      "main": [
+        [
+          {
+            "node": "Notify Sales - Hot Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Sales - Standard Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Sales - Hot Lead": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Sales - Standard Lead": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "lead-gen-automation-v1",
+  "nodeGroups": [],
+  "tags": []
+}
