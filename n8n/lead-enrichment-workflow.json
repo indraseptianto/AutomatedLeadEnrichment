@@ -1,0 +1,419 @@
+{
+  "name": "Automated Lead Enrichment & Onboarding MVP",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "Webhook_Lead_Intake",
+      "name": "Webhook - Lead Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has_name",
+              "leftValue": "={{ $json.body.name }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "id": "has_email",
+              "leftValue": "={{ $json.body.email }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "id": "has_company",
+              "leftValue": "={{ $json.body.company }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ]
+        }
+      },
+      "id": "IF_Validate_Required_Fields",
+      "name": "IF - Validate Required Fields",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"Missing required fields: name, email, or company\"\n}"
+      },
+      "id": "Respond_Validation_Error",
+      "name": "Respond - Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [520, 180]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "name",
+              "name": "name",
+              "value": "={{ ($json.body.name || '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "email",
+              "name": "email",
+              "value": "={{ ($json.body.email || '').trim().toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "company",
+              "name": "company",
+              "value": "={{ ($json.body.company || '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "={{ $json.body.message || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "source",
+              "name": "source",
+              "value": "={{ $json.body.source || 'website_contact_form' }}",
+              "type": "string"
+            },
+            {
+              "id": "received_at",
+              "name": "received_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_Normalize_Lead",
+      "name": "Set - Normalize Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [520, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $json;\nconst company = (lead.company || '').toLowerCase();\n\nlet companySize = 'Unknown';\nlet linkedinUrl = null;\nlet industry = 'General';\n\nif (company.includes('acme')) {\n  companySize = '51-200';\n  linkedinUrl = 'https://www.linkedin.com/company/acme';\n  industry = 'Technology';\n} else if (company.includes('global')) {\n  companySize = '201-500';\n  linkedinUrl = 'https://www.linkedin.com/company/global';\n  industry = 'Enterprise Services';\n} else if (company.includes('studio')) {\n  companySize = '1-10';\n  linkedinUrl = 'https://www.linkedin.com/search/results/companies/?keywords=' + encodeURIComponent(lead.company);\n  industry = 'Creative Services';\n} else {\n  companySize = '11-50';\n  linkedinUrl = 'https://www.linkedin.com/search/results/companies/?keywords=' + encodeURIComponent(lead.company);\n}\n\nreturn [{\n  json: {\n    ...lead,\n    company_size: companySize,\n    company_linkedin_url: linkedinUrl,\n    industry,\n    enrichment_status: 'mock_enriched'\n  }\n}];"
+      },
+      "id": "Code_Mock_Company_Enrichment",
+      "name": "Code - Mock Company Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LARAVEL_API_URL || 'http://localhost:8000/api/leads' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Automation-Token",
+              "value": "={{ $env.AUTOMATION_TOKEN || 'demo-secret-token' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": $json.name,\n  \"email\": $json.email,\n  \"company\": $json.company,\n  \"message\": $json.message,\n  \"source\": $json.source,\n  \"company_size\": $json.company_size,\n  \"company_linkedin_url\": $json.company_linkedin_url,\n  \"industry\": $json.industry,\n  \"enrichment_status\": $json.enrichment_status,\n  \"received_at\": $json.received_at\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "HTTP_Save_Lead_To_Laravel",
+      "name": "HTTP - Save Lead to Laravel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, -80],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "success_true",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "id": "lead_id_exists",
+              "leftValue": "={{ $json.lead_id }}",
+              "rightValue": "",
+              "operator": { "type": "number", "operation": "exists" }
+            }
+          ]
+        }
+      },
+      "id": "IF_Laravel_Save_Success",
+      "name": "IF - Laravel Save Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, -80]
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@example.com",
+        "toEmail": "={{ $('Set - Normalize Lead').item.json.email }}",
+        "subject": "={{ 'Thanks for contacting us, ' + $('Set - Normalize Lead').item.json.name }}",
+        "text": "={{ 'Hi ' + $('Set - Normalize Lead').item.json.name + ',\\n\\nThanks for reaching out to us.\\n\\nWe received your enquiry from ' + $('Set - Normalize Lead').item.json.company + ' and our team will review it shortly.\\n\\nBest regards,\\nBusiness Automation Team' }}",
+        "options": {}
+      },
+      "id": "Email_Welcome_Lead",
+      "name": "Email - Welcome Lead",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1640, -180],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@example.com",
+        "toEmail": "sales@example.com",
+        "subject": "={{ 'New enriched lead: ' + $('Set - Normalize Lead').item.json.company }}",
+        "text": "={{ 'A new lead was received and enriched.\\n\\nName: ' + $('Set - Normalize Lead').item.json.name + '\\nEmail: ' + $('Set - Normalize Lead').item.json.email + '\\nCompany: ' + $('Set - Normalize Lead').item.json.company + '\\nCompany Size: ' + $('Code - Mock Company Enrichment').item.json.company_size + '\\nLinkedIn: ' + $('Code - Mock Company Enrichment').item.json.company_linkedin_url + '\\nIndustry: ' + $('Code - Mock Company Enrichment').item.json.industry + '\\n\\nLead has been saved to the Laravel dashboard.' }}",
+        "options": {}
+      },
+      "id": "Email_Internal_Notification",
+      "name": "Email - Internal Sales Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1900, -180],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 200,
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Lead received, enriched, saved, and welcome email sent.\",\n  \"lead\": {\n    \"name\": $('Set - Normalize Lead').item.json.name,\n    \"email\": $('Set - Normalize Lead').item.json.email,\n    \"company\": $('Set - Normalize Lead').item.json.company,\n    \"company_size\": $('Code - Mock Company Enrichment').item.json.company_size,\n    \"lead_id\": $('HTTP - Save Lead to Laravel').item.json.lead_id\n  }\n}"
+      },
+      "id": "Respond_Success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2160, -180]
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@example.com",
+        "toEmail": "admin@example.com",
+        "subject": "Lead automation failed: Laravel API unavailable",
+        "text": "={{ 'The n8n workflow received a lead but failed to save it to Laravel.\\n\\nLead:\\n' + JSON.stringify($('Code - Mock Company Enrichment').item.json, null, 2) + '\\n\\nLaravel response/error:\\n' + JSON.stringify($json, null, 2) + '\\n\\nAction required: check the Laravel API and reprocess the lead manually if needed.' }}",
+        "options": {}
+      },
+      "id": "Email_Error_Alert",
+      "name": "Email - Error Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1640, 80],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 502,
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"Lead received but Laravel API failed. Internal team has been notified.\"\n}"
+      },
+      "id": "Respond_API_Failure",
+      "name": "Respond - API Failure",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1900, 80]
+    }
+  ],
+  "connections": {
+    "Webhook - Lead Intake": {
+      "main": [
+        [
+          {
+            "node": "IF - Validate Required Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Validate Required Fields": {
+      "main": [
+        [
+          {
+            "node": "Set - Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "Code - Mock Company Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Mock Company Enrichment": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Save Lead to Laravel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Save Lead to Laravel": {
+      "main": [
+        [
+          {
+            "node": "IF - Laravel Save Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Laravel Save Success?": {
+      "main": [
+        [
+          {
+            "node": "Email - Welcome Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email - Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Welcome Lead": {
+      "main": [
+        [
+          {
+            "node": "Email - Internal Sales Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Internal Sales Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Error Alert": {
+      "main": [
+        [
+          {
+            "node": "Respond - API Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "lead-enrichment"
+    },
+    {
+      "name": "assessment"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-07-08T00:00:00.000Z",
+  "versionId": "lead-enrichment-mvp-v1"
+}
