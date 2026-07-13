@@ -1,0 +1,313 @@
+{
+  "name": "Bengkel Reminder CRM - WhatsApp Follow Up",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bengkel-transaction",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "Webhook_Transaction_Intake",
+      "name": "Webhook - Transaction Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\n\nfunction cleanPhone(phone) {\n  let p = String(phone || '').replace(/[^0-9]/g, '');\n  if (p.startsWith('0')) p = '62' + p.slice(1);\n  if (!p.startsWith('62')) p = '62' + p;\n  return p;\n}\n\nfunction addDays(date, days) {\n  const d = new Date(date);\n  d.setDate(d.getDate() + days);\n  return d.toISOString().slice(0, 10);\n}\n\nconst service = String(body.jenis_layanan || '').toLowerCase();\nlet reminderDays = 60;\nif (service.includes('oli')) reminderDays = 30;\nif (service.includes('ban')) reminderDays = 90;\nif (service.includes('service')) reminderDays = 60;\n\nconst txDate = body.tanggal_transaksi || new Date().toISOString().slice(0, 10);\n\nreturn [{\n  json: {\n    customer_id: body.customer_id || `${cleanPhone(body.nomor_wa)}-${String(body.plat_nomor || '').replace(/\\s+/g, '').toUpperCase()}`,\n    nama: String(body.nama || '').trim(),\n    nomor_wa: cleanPhone(body.nomor_wa),\n    plat_nomor: String(body.plat_nomor || '').trim().toUpperCase(),\n    jenis_layanan: String(body.jenis_layanan || '').trim(),\n    tanggal_transaksi: txDate,\n    nominal_transaksi: Number(body.nominal_transaksi || 0),\n    reminder_days: reminderDays,\n    next_reminder_date: addDays(txDate, reminderDays),\n    reminder_stage: 'none',\n    last_message_sent_at: '',\n    status: 'active',\n    consent_whatsapp: String(body.consent_whatsapp || 'yes').toLowerCase(),\n    notes: body.notes || ''\n  }\n}];"
+      },
+      "id": "Code_Normalize_Transaction",
+      "name": "Code - Normalize Transaction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "1-bj6mbRkk7EtmbH1n9TA7etCKUGqGi_1LFVxG7VX0CY",
+        "sheetName": "bengkel_crm_dummy_transactions",
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "GoogleSheets_Append_Transaction",
+      "name": "Google Sheets - Append Transaction",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        540,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FlWFTLLq8PpYDJrK",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Transaction saved\",\n  \"next_reminder_date\": \"{{ $('Code - Normalize Transaction').item.json.next_reminder_date }}\"\n}"
+      },
+      "id": "Respond_Success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        820,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "Schedule_Daily_9AM",
+      "name": "Schedule - Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": "1-bj6mbRkk7EtmbH1n9TA7etCKUGqGi_1LFVxG7VX0CY",
+        "sheetName": "bengkel_crm_dummy_transactions",
+        "options": {}
+      },
+      "id": "GoogleSheets_Read_Transactions",
+      "name": "Google Sheets - Read Transactions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        420
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FlWFTLLq8PpYDJrK",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const today = new Date().toISOString().slice(0, 10);\nconst output = [];\n\nfor (const item of items) {\n  const r = item.json;\n  if (String(r.consent_whatsapp || '').toLowerCase() !== 'yes') continue;\n  if (String(r.status || '').toLowerCase() !== 'active') continue;\n\n  const stage = String(r.reminder_stage || 'none');\n  const next = String(r.next_reminder_date || '');\n  const lastSent = String(r.last_message_sent_at || '').slice(0, 10);\n\n  if (next && next <= today && stage === 'none') {\n    output.push({ json: { ...r, message_type: 'reminder' } });\n    continue;\n  }\n\n  if (stage === 'reminder_30_sent' && lastSent) {\n    const d = new Date(lastSent);\n    d.setDate(d.getDate() + 7);\n    const discountDate = d.toISOString().slice(0, 10);\n    if (discountDate <= today) output.push({ json: { ...r, message_type: 'discount' } });\n  }\n}\n\nreturn output;"
+      },
+      "id": "Code_Find_Due_Followups",
+      "name": "Code - Find Due Followups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const r = item.json;\n  const shop = $env.SHOP_NAME || 'Bengkel Kami';\n  const promoEnd = new Date();\n  promoEnd.setDate(promoEnd.getDate() + 7);\n\n  let message;\n  let nextStage;\n\n  if (r.message_type === 'discount') {\n    message = `Halo ${r.nama}, promo khusus untuk motor ${r.plat_nomor}. Dapat diskon 10% untuk ganti oli/service ringan di ${shop} sampai ${promoEnd.toISOString().slice(0, 10)}. Balas pesan ini untuk booking.`;\n    nextStage = 'discount_7d_sent';\n  } else {\n    message = `Halo ${r.nama}, kami dari ${shop}. Motor dengan plat ${r.plat_nomor} terakhir melakukan ${r.jenis_layanan} pada ${r.tanggal_transaksi}. Sudah waktunya cek kondisi oli/ban agar motor tetap aman dipakai. Balas pesan ini untuk booking.`;\n    nextStage = 'reminder_30_sent';\n  }\n\n  return { json: { ...r, wa_target: r.nomor_wa, wa_message: message, next_stage: nextStage, sent_at: new Date().toISOString() } };\n});"
+      },
+      "id": "Code_Prepare_WA_Message",
+      "name": "Code - Prepare WA Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.fonnte.com/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.FONNTE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "={{ $json.wa_target }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.wa_message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "HTTP_Send_WhatsApp_Fonnte",
+      "name": "HTTP - Send WhatsApp via Fonnte",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "1-bj6mbRkk7EtmbH1n9TA7etCKUGqGi_1LFVxG7VX0CY",
+        "sheetName": "bengkel_crm_dummy_messagelog",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{ $('Code - Prepare WA Message').item.json.customer_id }}",
+            "nama": "={{ $('Code - Prepare WA Message').item.json.nama }}",
+            "nomor_wa": "={{ $('Code - Prepare WA Message').item.json.nomor_wa }}",
+            "plat_nomor": "={{ $('Code - Prepare WA Message').item.json.plat_nomor }}",
+            "message_type": "={{ $('Code - Prepare WA Message').item.json.message_type }}",
+            "message": "={{ $('Code - Prepare WA Message').item.json.wa_message }}",
+            "sent_at": "={{ $('Code - Prepare WA Message').item.json.sent_at }}",
+            "provider_response": "={{ JSON.stringify($json) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "GoogleSheets_Log_Message",
+      "name": "Google Sheets - Log Message",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1380,
+        420
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FlWFTLLq8PpYDJrK",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Transaction Intake": {
+      "main": [
+        [
+          {
+            "node": "Code - Normalize Transaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Normalize Transaction": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Append Transaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Append Transaction": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule - Daily 09:00": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Read Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Read Transactions": {
+      "main": [
+        [
+          {
+            "node": "Code - Find Due Followups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Find Due Followups": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare WA Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare WA Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Send WhatsApp via Fonnte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Send WhatsApp via Fonnte": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Log Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "bengkel-reminder-crm-v1",
+  "triggerCount": 2,
+  "tags": []
+}
